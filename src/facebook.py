@@ -42,15 +42,70 @@ import urllib
 try:
     import json
     _parse_json = lambda s: json.loads(s)
+    _dump_json = lambda s: json.dumps(s)
 except ImportError:
     try:
         import simplejson
         _parse_json = lambda s: simplejson.loads(s)
+        _dump_json = lambda s: simplejson.dumps(s)
     except ImportError:
         # For Google AppEngine
         from django.utils import simplejson
         _parse_json = lambda s: simplejson.loads(s)
+        _dump_json = lambda s: simplejson.dumps(s)
 
+class API(object):
+    def __init__(self, access_token=None, format="JSON"):
+        self.access_token = access_token
+        self.format = format
+
+    def get(self, id, **args):
+        return self.request(id, args)
+
+    def post(self, method, **data):
+        assert self.access_token, "Write operations require an access token"
+        return self.request("method/" + method, post_args=data)
+
+    def request(self, path, args=None, post_args=None):
+        if not args: args = {}
+
+        for key in args:
+            if not isinstance(args[key], str):
+                args[key] = _dump_json(args[key])
+
+        for key in post_args:
+            if not isinstance(post_args[key], str):
+                post_args[key] = _dump_json(post_args[key])
+
+        if self.access_token:
+            if post_args is not None:
+                post_args["access_token"] = self.access_token
+                post_args["format"] = self.format
+            else:
+                args["access_token"] = self.access_token
+
+        args["format"] = self.format
+        post_data = None if post_args is None else urllib.urlencode(post_args)
+        file = urllib.urlopen("https://api.facebook.com/" + path + "?" +
+                              urllib.urlencode(args), post_data)
+        try:
+            response = _parse_json(file.read()) if self.format == 'JSON' else file.read()
+        finally:
+            file.close()
+
+        try:
+            if self.format == 'JSON' and response.get("error_code"):
+                raise APIError(response.get("error_code"), response.get("error_msg"))
+        except:
+            pass
+
+        return response
+
+
+class APIError(Exception):
+    def __init__(self, type, message):
+        Exception.__init__(self, message)
+        self.type = type
 
 class GraphAPI(object):
     """A client for the Facebook Graph API.
